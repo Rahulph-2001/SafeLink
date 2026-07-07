@@ -18,8 +18,10 @@ export const useCanvasSnapshot = () => {
     }
     if (!canvasRef.current) {
       canvasRef.current = document.createElement('canvas');
-      canvasRef.current.width = 640;
-      canvasRef.current.height = 480;
+      // Dimensions will be updated dynamically at capture time
+      // to match the actual camera stream resolution.
+      canvasRef.current.width = 1920;
+      canvasRef.current.height = 1080;
     }
   };
 
@@ -32,7 +34,11 @@ export const useCanvasSnapshot = () => {
       }
       initCanvas();
       const newStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: mode },
+        video: {
+          facingMode: mode,
+          width:  { ideal: 1920, min: 1280 },
+          height: { ideal: 1080, min: 720 },
+        },
         audio: false
       });
       // Store directly into ref — no async setState delay
@@ -81,11 +87,18 @@ export const useCanvasSnapshot = () => {
 
       const context = canvasRef.current.getContext('2d');
       if (context) {
-        context.drawImage(video, 0, 0, canvasRef.current.width, canvasRef.current.height);
+        // Sync canvas size to the real stream resolution every frame
+        // so we never crop or upscale the image.
+        const actualW = video.videoWidth  || 1920;
+        const actualH = video.videoHeight || 1080;
+        canvasRef.current.width  = actualW;
+        canvasRef.current.height = actualH;
+
+        context.drawImage(video, 0, 0, actualW, actualH);
         canvasRef.current.toBlob(
           (blob) => resolve(blob),
           'image/jpeg',
-          0.7
+          0.95   // High quality (was 0.7)
         );
       } else {
         resolve(null);
