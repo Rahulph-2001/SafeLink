@@ -93,12 +93,9 @@ export const useEmergencySession = () => {
       runImageCycle();
       imageIntervalId.current = setInterval(runImageCycle, IMAGE_INTERVAL_MS);
 
-      // 4b. VIDEO loop — first clip after RECORD_DURATION_MS delay
-      //     (gives camera time to warm up), then every 30s
-      setTimeout(() => {
-        runVideoCycle();
-        videoIntervalId.current = setInterval(runVideoCycle, CYCLE_INTERVAL_MS);
-      }, RECORD_DURATION_MS); // start first video cycle after 20s
+      // 4b. VIDEO loop — record 10s video immediately, then every 15s
+      runVideoCycle();
+      videoIntervalId.current = setInterval(runVideoCycle, CYCLE_INTERVAL_MS);
 
     } catch (error) {
       console.error('[Emergency] Failed to start:', error);

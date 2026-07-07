@@ -11,16 +11,10 @@ export const uploadSnapshot = async (blob: Blob): Promise<string> => {
   const isVideo      = blob.type.startsWith('video/');
   const resourceType = isVideo ? 'video' : 'image';
 
-  const uploadPreset = isVideo
-    ? import.meta.env.VITE_CLOUDINARY_VIDEO_PRESET    // afelink_video
-    : import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;  // trjrx44o
+  const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
 
   if (!uploadPreset) {
-    throw new Error(
-      isVideo
-        ? 'VITE_CLOUDINARY_VIDEO_PRESET missing in .env — add it and create the preset in Cloudinary'
-        : 'VITE_CLOUDINARY_UPLOAD_PRESET missing in .env'
-    );
+    throw new Error('VITE_CLOUDINARY_UPLOAD_PRESET missing in .env');
   }
 
   const ext      = isVideo ? (blob.type.includes('mp4') ? 'mp4' : 'webm') : 'jpg';
@@ -29,7 +23,7 @@ export const uploadSnapshot = async (blob: Blob): Promise<string> => {
   console.log(
     `[Cloudinary] Uploading ${filename} | ` +
     `${(blob.size / 1024).toFixed(1)} KB | ` +
-    `preset: ${uploadPreset} | endpoint: /${resourceType}/upload`
+    `preset: ${uploadPreset} | endpoint: /auto/upload`
   );
 
   const formData = new FormData();
@@ -37,7 +31,7 @@ export const uploadSnapshot = async (blob: Blob): Promise<string> => {
   formData.append('upload_preset', uploadPreset);
 
   const response = await fetch(
-    `https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`,
+    `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`,
     { method: 'POST', body: formData }
   );
 

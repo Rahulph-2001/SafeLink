@@ -75,7 +75,7 @@ export const SnapshotViewer = ({ snapshotUrl, isActive }: SnapshotViewerProps) =
       {snapshotUrl && (
         <p className="text-xs text-gray-400 mt-2 text-center">
           {showVideo
-            ? '20-second video clip · refreshes every 30 s'
+            ? '10-second video clip · refreshes every 15 s'
             : 'Live snapshot · refreshes every 8 s'}
         </p>
       )}

@@ -2,8 +2,8 @@ import { useState, useRef, useCallback } from 'react';
 
 // ─── Timing constants ──────────────────────────────────────────────────────────
 export const IMAGE_INTERVAL_MS  =  8_000; // snapshot every 8 s
-export const RECORD_DURATION_MS = 20_000; // video clip length
-export const CYCLE_INTERVAL_MS  = 30_000; // video cycle period
+export const RECORD_DURATION_MS = 10_000; // 10s video clip
+export const CYCLE_INTERVAL_MS  = 15_000; // new clip every 15s
 
 // ─── Best supported video MIME ────────────────────────────────────────────────
 const getSupportedMime = (): string => {
@@ -49,8 +49,8 @@ export const useVideoRecorder = () => {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: mode,
-          width:  { ideal: 1920, min: 640 },
-          height: { ideal: 1080, min: 480 },
+          width:  { ideal: 1280, min: 640 },
+          height: { ideal: 720, min: 480 },
         },
         audio: false,
       });
@@ -160,7 +160,10 @@ export const useVideoRecorder = () => {
       const mimeType = getSupportedMime();
       let recorder: MediaRecorder;
       try {
-        recorder = new MediaRecorder(streamRef.current, mimeType ? { mimeType } : undefined);
+        recorder = new MediaRecorder(streamRef.current, {
+          mimeType: mimeType ? mimeType : undefined,
+          videoBitsPerSecond: 500000 // 500 kbps to ensure small file size
+        });
       } catch (e) {
         console.error('[recordClip] MediaRecorder init failed:', e);
         resolve(null);
