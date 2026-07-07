@@ -82,17 +82,17 @@ export const EmergencyPage = () => {
               <EmergencyStatusBar telemetry={telemetry} startTime={startTime || new Date()} />
               
               <div className="bg-white rounded-lg shadow-md p-6 mb-8 text-center flex flex-col items-center">
-                <Video className="w-12 h-12 text-gray-300 mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">Camera Active</h3>
+                <Video className="w-12 h-12 text-red-400 mb-4 animate-pulse" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">Recording Active</h3>
                 <p className="text-sm text-gray-500 mb-6">
-                  Taking silent snapshots every 8 seconds and sharing with contacts.
+                  Recording a 20-second video clip every 30 seconds and sharing with your trusted contacts.
                 </p>
                 <button
                   onClick={toggleCamera}
                   className="flex items-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-800 px-4 py-2 rounded-md transition-colors"
                 >
                   <Camera className="w-5 h-5" />
-                  Switch to {facingMode === 'environment' ? 'Front' : 'Rear'} Camera
+                  Switch to {facingMode === 'user' ? 'Rear' : 'Front'} Camera
                 </button>
               </div>
 

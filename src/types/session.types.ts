@@ -14,7 +14,8 @@ export interface EmergencySession {
   status: 'active' | 'ended';
   startedAt: Date;
   endedAt: Date | null;
-  currentSnapshotUrl: string | null;
+  /** URL of the latest uploaded media — now a 20-second video clip */
+  currentSnapshotUrl: string | null;  // kept for Firestore backward-compat
   latestTelemetry: TelemetryData | null;
   route: RoutePoint[];
 }

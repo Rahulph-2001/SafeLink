@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { useGeolocation } from './useGeolocation';
-import { useCanvasSnapshot } from './useCanvasSnapshot';
+import { useVideoRecorder, CYCLE_INTERVAL_MS } from './useVideoRecorder';
 import { createSession, updateSessionTelemetry, endSession } from '../services/emergencyService';
 import { uploadSnapshot } from '../services/storageService';
 import { sendEmergencyNotifications } from '../services/notificationService';
@@ -8,60 +8,80 @@ import type { UserProfile } from '../types/user.types';
 
 export const useEmergencySession = () => {
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [isActive, setIsActive] = useState(false);
-  const intervalId = useRef<ReturnType<typeof setInterval> | null>(null);
-  
-  const { telemetry, error: geoError, startWatching, stopWatching } = useGeolocation();
-  const { startCapture, stopCapture, captureFrame, toggleCamera, facingMode, error: camError } = useCanvasSnapshot();
+  const [isActive,  setIsActive]  = useState(false);
 
-  // Use a ref to capture the latest telemetry inside the setInterval closure
+  // Interval ref — one interval drives the 30-second cycle
+  const intervalId = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const { telemetry, error: geoError, startWatching, stopWatching } = useGeolocation();
+  const {
+    startCapture,
+    stopCapture,
+    recordClip,
+    toggleCamera,
+    facingMode,
+    error: camError,
+  } = useVideoRecorder();
+
+  // Keep latest telemetry accessible inside the interval closure (stale-closure fix)
   const telemetryRef = useRef(telemetry);
   telemetryRef.current = telemetry;
 
+  // ── Start emergency ──────────────────────────────────────────────────────────
   const startEmergency = async (user: UserProfile) => {
     try {
-      // 1. Start hardware capture
-      await startCapture();
+      // 1. Start hardware capture (front camera by default)
+      await startCapture('user');
       startWatching();
 
-      // 2. Create DB Session
+      // 2. Create Firestore session
       const newSessionId = await createSession(user);
       setSessionId(newSessionId);
       setIsActive(true);
 
-      // Send notifications to all trusted contacts
+      // 3. Notify contacts
       try {
         await sendEmergencyNotifications(user, newSessionId);
       } catch (e) {
-        console.error("Failed to send notifications", e);
+        console.error('Failed to send notifications', e);
       }
 
-      // 3. Start snapshot upload loop (every 8 seconds)
-      intervalId.current = setInterval(async () => {
-        const blob = await captureFrame();
-        let snapshotUrl = null;
+      // 4. Start the 30-second video clip cycle
+      //    Each tick:  record 20s → upload → update telemetry
+      //    The interval fires every CYCLE_INTERVAL_MS (30s), so the 10s gap
+      //    between the end of recording and the next tick acts as the "rest" period.
+      const runCycle = async () => {
+        // Record a 20-second video clip
+        const blob = await recordClip();
+
+        let videoUrl: string | null = null;
         if (blob) {
           try {
-             snapshotUrl = await uploadSnapshot(blob);
+            videoUrl = await uploadSnapshot(blob);
           } catch (e) {
-             console.error("Failed to upload snapshot", e);
+            console.error('Failed to upload video clip', e);
           }
         }
-        
-        // 4. Update Firestore with new telemetry and snapshot
+
+        // Push latest telemetry + video URL to Firestore
         try {
-          await updateSessionTelemetry(newSessionId, telemetryRef.current, snapshotUrl);
+          await updateSessionTelemetry(newSessionId, telemetryRef.current, videoUrl);
         } catch (e) {
-          console.error("Failed to update telemetry", e);
+          console.error('Failed to update telemetry', e);
         }
-      }, 8000);
+      };
+
+      // Kick off first cycle immediately, then repeat every 30s
+      runCycle();
+      intervalId.current = setInterval(runCycle, CYCLE_INTERVAL_MS);
 
     } catch (error) {
-      console.error("Failed to start emergency", error);
+      console.error('Failed to start emergency', error);
       stopEmergency();
     }
   };
 
+  // ── Stop emergency ───────────────────────────────────────────────────────────
   const stopEmergency = async () => {
     if (intervalId.current) {
       clearInterval(intervalId.current);
@@ -75,7 +95,7 @@ export const useEmergencySession = () => {
       try {
         await endSession(sessionId);
       } catch (e) {
-         console.error("Failed to end session", e);
+        console.error('Failed to end session', e);
       }
       setSessionId(null);
     }
@@ -90,6 +110,6 @@ export const useEmergencySession = () => {
     startEmergency,
     stopEmergency,
     toggleCamera,
-    facingMode
+    facingMode,
   };
 };
