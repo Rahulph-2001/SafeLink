@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useEmergencySession } from '../hooks/useEmergencySession';
 import { EmergencyStatusBar } from '../components/emergency/EmergencyStatusBar';
@@ -21,14 +21,6 @@ export const EmergencyPage = () => {
   } = useEmergencySession();
 
   const [startTime, setStartTime] = useState<Date | null>(null);
-  const [now, setNow] = useState(new Date());
-  
-  useEffect(() => {
-    if (isActive) {
-      const timer = setInterval(() => setNow(new Date()), 1000);
-      return () => clearInterval(timer);
-    }
-  }, [isActive]);
 
   const handleStart = async () => {
     if (profile) {
