@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { useGeolocation } from './useGeolocation';
-import { useVideoRecorder, IMAGE_INTERVAL_MS, RECORD_DURATION_MS, CYCLE_INTERVAL_MS } from './useVideoRecorder';
+import { useVideoRecorder, IMAGE_INTERVAL_MS, CYCLE_INTERVAL_MS } from './useVideoRecorder';
 import { createSession, updateSessionTelemetry, endSession } from '../services/emergencyService';
 import { uploadSnapshot } from '../services/storageService';
 import { sendEmergencyNotifications } from '../services/notificationService';
