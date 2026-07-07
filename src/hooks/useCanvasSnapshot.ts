@@ -2,7 +2,8 @@ import { useState, useRef, useCallback } from 'react';
 
 export const useCanvasSnapshot = () => {
   const [error, setError] = useState<string | null>(null);
-  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
+  // Default to front camera ('user'); toggle switches to back ('environment') and back.
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('user');
 
   // Use refs so captureFrame always sees the latest values inside setInterval (no stale closure)
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -25,7 +26,7 @@ export const useCanvasSnapshot = () => {
     }
   };
 
-  const startCapture = useCallback(async (mode: 'environment' | 'user' = 'environment') => {
+  const startCapture = useCallback(async (mode: 'environment' | 'user' = 'user') => {
     try {
       // Stop any existing stream first
       if (streamRef.current) {
@@ -107,7 +108,8 @@ export const useCanvasSnapshot = () => {
   }, []);
 
   const toggleCamera = useCallback(() => {
-    const newMode = facingMode === 'environment' ? 'user' : 'environment';
+    // Front ('user') → Back ('environment') → Front ('user') ...
+    const newMode = facingMode === 'user' ? 'environment' : 'user';
     startCapture(newMode);
   }, [facingMode, startCapture]);
 
