@@ -62,7 +62,7 @@ export const EmergencyPage = () => {
               <div className="text-center mb-10">
                 <h2 className="text-3xl font-extrabold text-gray-900 mb-4">Emergency Assistant</h2>
                 <p className="text-gray-600 max-w-md mx-auto">
-                  Pressing the SOS button will immediately begin sharing your live location and camera snapshots with your trusted contacts.
+                  SOS instantly shares your live location, camera snapshots every 8 seconds, and a video clip every 30 seconds with your trusted contacts.
                 </p>
               </div>
 
@@ -83,9 +83,9 @@ export const EmergencyPage = () => {
               
               <div className="bg-white rounded-lg shadow-md p-6 mb-8 text-center flex flex-col items-center">
                 <Video className="w-12 h-12 text-red-400 mb-4 animate-pulse" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">Recording Active</h3>
+                <h3 className="text-lg font-medium text-gray-900 mb-2">Broadcasting Live</h3>
                 <p className="text-sm text-gray-500 mb-6">
-                  Recording a 20-second video clip every 30 seconds and sharing with your trusted contacts.
+                  📸 Snapshot every <strong>8 s</strong> · 🎥 Video clip every <strong>30 s</strong>
                 </p>
                 <button
                   onClick={toggleCamera}
