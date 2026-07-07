@@ -1,11 +1,13 @@
 import { useState, useRef, useCallback } from 'react';
 
 export const useCanvasSnapshot = () => {
-  const [stream, setStream] = useState<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
+
+  // Use refs so captureFrame always sees the latest values inside setInterval (no stale closure)
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
+  const streamRef = useRef<MediaStream | null>(null);
 
   const initCanvas = () => {
     if (!videoRef.current) {
@@ -21,63 +23,80 @@ export const useCanvasSnapshot = () => {
     }
   };
 
-  const startCapture = useCallback(async (mode: 'environment' | 'user' = facingMode) => {
+  const startCapture = useCallback(async (mode: 'environment' | 'user' = 'environment') => {
     try {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
+      // Stop any existing stream first
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
       }
       initCanvas();
       const newStream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: mode },
         audio: false
       });
-      setStream(newStream);
+      // Store directly into ref — no async setState delay
+      streamRef.current = newStream;
       setFacingMode(mode);
       if (videoRef.current) {
         videoRef.current.srcObject = newStream;
-        videoRef.current.play().catch(e => console.warn("Video autoplay blocked:", e));
+        await videoRef.current.play().catch(e => console.warn("Video autoplay blocked:", e));
       }
       setError(null);
     } catch (err: any) {
       setError(err.message || 'Camera access denied');
     }
-  }, [stream, facingMode]);
+  }, []);
 
   const stopCapture = useCallback(() => {
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-      setStream(null);
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
     }
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-  }, [stream]);
+  }, []);
 
   const captureFrame = useCallback((): Promise<Blob | null> => {
     return new Promise((resolve) => {
-      if (!videoRef.current || !canvasRef.current || !stream) {
+      // Reads from refs — always gets the current value, avoids stale closures
+      if (!videoRef.current || !canvasRef.current || !streamRef.current) {
+        console.warn("captureFrame: missing video, canvas, or stream", {
+          video: !!videoRef.current,
+          canvas: !!canvasRef.current,
+          stream: !!streamRef.current
+        });
         resolve(null);
         return;
       }
-      
+
+      const video = videoRef.current;
+      // Ensure video has actual frame data before drawing to canvas
+      if (video.readyState < 2) {
+        console.warn("captureFrame: video not ready, readyState =", video.readyState);
+        resolve(null);
+        return;
+      }
+
       const context = canvasRef.current.getContext('2d');
       if (context) {
-        context.drawImage(videoRef.current, 0, 0, canvasRef.current.width, canvasRef.current.height);
+        context.drawImage(video, 0, 0, canvasRef.current.width, canvasRef.current.height);
         canvasRef.current.toBlob(
           (blob) => resolve(blob),
           'image/jpeg',
-          0.6
+          0.7
         );
       } else {
         resolve(null);
       }
     });
-  }, [stream]);
+  }, []);
 
   const toggleCamera = useCallback(() => {
     const newMode = facingMode === 'environment' ? 'user' : 'environment';
     startCapture(newMode);
   }, [facingMode, startCapture]);
 
-  return { stream, error, startCapture, stopCapture, captureFrame, toggleCamera, facingMode };
+  return { error, startCapture, stopCapture, captureFrame, toggleCamera, facingMode };
 };
