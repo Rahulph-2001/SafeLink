@@ -10,8 +10,9 @@ export const useEmergencySession = () => {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isActive,  setIsActive]  = useState(false);
 
-  // Interval ref — one interval drives the 30-second cycle
-  const intervalId = useRef<ReturnType<typeof setInterval> | null>(null);
+  const intervalId    = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Guard: prevents a new cycle from starting before the previous one finishes
+  const isCycleRunning = useRef(false);
 
   const { telemetry, error: geoError, startWatching, stopWatching } = useGeolocation();
   const {
@@ -23,80 +24,104 @@ export const useEmergencySession = () => {
     error: camError,
   } = useVideoRecorder();
 
-  // Keep latest telemetry accessible inside the interval closure (stale-closure fix)
-  const telemetryRef = useRef(telemetry);
+  // Always expose latest telemetry inside the interval closure (stale-closure fix)
+  const telemetryRef  = useRef(telemetry);
   telemetryRef.current = telemetry;
 
-  // ── Start emergency ──────────────────────────────────────────────────────────
+  // Keep sessionId accessible inside interval without stale closure
+  const sessionIdRef  = useRef<string | null>(null);
+
+  // ── Single clip cycle: record 20s → upload → push to Firestore ─────────────
+  const runCycle = async () => {
+    // Skip if a previous cycle is still in progress (upload took > 10s on slow net)
+    if (isCycleRunning.current) {
+      console.warn('[Emergency] Previous cycle still running — skipping this tick');
+      return;
+    }
+    if (!sessionIdRef.current) return;
+
+    isCycleRunning.current = true;
+    try {
+      console.log('[Emergency] Starting 20s recording…');
+      const blob = await recordClip();           // waits ~20 s
+
+      let mediaUrl: string | null = null;
+      if (blob) {
+        try {
+          mediaUrl = await uploadSnapshot(blob); // upload to Cloudinary
+        } catch (e) {
+          console.error('[Emergency] Upload failed:', e);
+        }
+      } else {
+        console.warn('[Emergency] recordClip returned null — nothing to upload');
+      }
+
+      // Push telemetry + media URL to Firestore (even if mediaUrl is null)
+      try {
+        await updateSessionTelemetry(
+          sessionIdRef.current,
+          telemetryRef.current,
+          mediaUrl
+        );
+      } catch (e) {
+        console.error('[Emergency] Firestore update failed:', e);
+      }
+    } finally {
+      isCycleRunning.current = false;
+    }
+  };
+
+  // ── Start emergency ─────────────────────────────────────────────────────────
   const startEmergency = async (user: UserProfile) => {
     try {
-      // 1. Start hardware capture (front camera by default)
+      // 1. Start camera (front camera first)
       await startCapture('user');
       startWatching();
 
       // 2. Create Firestore session
       const newSessionId = await createSession(user);
+      sessionIdRef.current = newSessionId;
       setSessionId(newSessionId);
       setIsActive(true);
 
-      // 3. Notify contacts
+      // 3. Notify trusted contacts
       try {
         await sendEmergencyNotifications(user, newSessionId);
       } catch (e) {
-        console.error('Failed to send notifications', e);
+        console.error('[Emergency] Notification failed:', e);
       }
 
-      // 4. Start the 30-second video clip cycle
-      //    Each tick:  record 20s → upload → update telemetry
-      //    The interval fires every CYCLE_INTERVAL_MS (30s), so the 10s gap
-      //    between the end of recording and the next tick acts as the "rest" period.
-      const runCycle = async () => {
-        // Record a 20-second video clip
-        const blob = await recordClip();
-
-        let videoUrl: string | null = null;
-        if (blob) {
-          try {
-            videoUrl = await uploadSnapshot(blob);
-          } catch (e) {
-            console.error('Failed to upload video clip', e);
-          }
-        }
-
-        // Push latest telemetry + video URL to Firestore
-        try {
-          await updateSessionTelemetry(newSessionId, telemetryRef.current, videoUrl);
-        } catch (e) {
-          console.error('Failed to update telemetry', e);
-        }
-      };
-
-      // Kick off first cycle immediately, then repeat every 30s
+      // 4. Run first cycle immediately, then repeat every CYCLE_INTERVAL_MS (30s)
+      //    Each cycle: records for RECORD_DURATION_MS (20s), uploads, updates Firestore
+      //    Leaving a ~10s gap before the next cycle starts (30 - 20 = 10s rest)
       runCycle();
       intervalId.current = setInterval(runCycle, CYCLE_INTERVAL_MS);
 
     } catch (error) {
-      console.error('Failed to start emergency', error);
+      console.error('[Emergency] Failed to start:', error);
       stopEmergency();
     }
   };
 
-  // ── Stop emergency ───────────────────────────────────────────────────────────
+  // ── Stop emergency ──────────────────────────────────────────────────────────
   const stopEmergency = async () => {
     if (intervalId.current) {
       clearInterval(intervalId.current);
       intervalId.current = null;
     }
+    isCycleRunning.current = false;
     stopWatching();
     stopCapture();
     setIsActive(false);
 
-    if (sessionId) {
+    const sid = sessionIdRef.current;
+    if (sid) {
       try {
-        await endSession(sessionId);
+        await endSession(sid);
       } catch (e) {
-        console.error('Failed to end session', e);
+        console.error('[Emergency] Failed to end session:', e);
       }
+      sessionIdRef.current = null;
       setSessionId(null);
     }
   };

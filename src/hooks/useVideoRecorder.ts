@@ -1,32 +1,45 @@
 import { useState, useRef, useCallback } from 'react';
 
-// ─── Timing constants ──────────────────────────────────────────────────────────
-export const RECORD_DURATION_MS = 20_000; // record for 20 seconds
-export const CYCLE_INTERVAL_MS  = 30_000; // new clip every 30 seconds
+// ─── Timing constants (exported so useEmergencySession can import them) ────────
+export const RECORD_DURATION_MS = 20_000; // record 20 s per clip
+export const CYCLE_INTERVAL_MS  = 30_000; // start a new clip every 30 s
 
 // ─── Best supported MIME type ─────────────────────────────────────────────────
 const getSupportedMime = (): string => {
   const candidates = [
-    'video/webm;codecs=vp9,opus',
-    'video/webm;codecs=vp8,opus',
+    'video/webm;codecs=vp9',
+    'video/webm;codecs=vp8',
     'video/webm',
     'video/mp4',
+    '',
   ];
-  return candidates.find((m) => MediaRecorder.isTypeSupported(m)) ?? '';
+  return candidates.find((m) => !m || MediaRecorder.isTypeSupported(m)) ?? '';
 };
 
 export const useVideoRecorder = () => {
   const [error, setError]           = useState<string | null>(null);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('user');
 
-  // Refs — avoids stale closures inside intervals
   const streamRef   = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  /** Cleanly stop any active recorder without destroying the stream */
+  const stopActiveRecorder = () => {
+    const rec = recorderRef.current;
+    if (rec && rec.state !== 'inactive') {
+      try { rec.stop(); } catch (_) {}
+    }
+    recorderRef.current = null;
+  };
 
   // ── Start camera stream ────────────────────────────────────────────────────
   const startCapture = useCallback(async (mode: 'environment' | 'user' = 'user') => {
     try {
-      // Tear down any existing stream first
+      // Stop recorder first so it doesn't reference the dying stream
+      stopActiveRecorder();
+
+      // Stop old stream tracks
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
@@ -35,8 +48,8 @@ export const useVideoRecorder = () => {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: mode,
-          width:  { ideal: 1920, min: 1280 },
-          height: { ideal: 1080, min: 720  },
+          width:  { ideal: 1920, min: 640 },
+          height: { ideal: 1080, min: 480 },
         },
         audio: false,
       });
@@ -45,32 +58,41 @@ export const useVideoRecorder = () => {
       setFacingMode(mode);
       setError(null);
     } catch (err: any) {
-      setError(err.message || 'Camera access denied');
+      const msg = err.message || 'Camera access denied';
+      console.error('startCapture failed:', msg);
+      setError(msg);
     }
   }, []);
 
-  // ── Stop camera stream ─────────────────────────────────────────────────────
+  // ── Stop everything ────────────────────────────────────────────────────────
   const stopCapture = useCallback(() => {
-    recorderRef.current?.stop();
-    recorderRef.current = null;
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
+    stopActiveRecorder();
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
   }, []);
 
-  // ── Record exactly RECORD_DURATION_MS of video, return Blob ───────────────
+  // ── Record one clip of RECORD_DURATION_MS and return its Blob ─────────────
   const recordClip = useCallback((): Promise<Blob | null> => {
     return new Promise((resolve) => {
       if (!streamRef.current) {
-        console.warn('recordClip: no active stream');
+        console.warn('recordClip: no active stream — skipping');
         resolve(null);
         return;
       }
+
+      // If a previous recorder is still running, stop it first
+      stopActiveRecorder();
 
       const mimeType = getSupportedMime();
       let recorder: MediaRecorder;
 
       try {
-        recorder = new MediaRecorder(streamRef.current, mimeType ? { mimeType } : undefined);
+        recorder = new MediaRecorder(
+          streamRef.current,
+          mimeType ? { mimeType } : undefined
+        );
       } catch (e) {
         console.error('MediaRecorder init failed:', e);
         resolve(null);
@@ -81,33 +103,45 @@ export const useVideoRecorder = () => {
       const chunks: BlobPart[] = [];
 
       recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunks.push(e.data);
+        // FIX: timeslice of 1000ms guarantees data arrives even on mobile
+        if (e.data && e.data.size > 0) chunks.push(e.data);
       };
 
       recorder.onstop = () => {
         recorderRef.current = null;
-        const blob = new Blob(chunks, { type: mimeType || 'video/webm' });
+        if (chunks.length === 0) {
+          console.warn('recordClip: no data chunks collected');
+          resolve(null);
+          return;
+        }
+        const finalMime = mimeType || 'video/webm';
+        const blob = new Blob(chunks, { type: finalMime });
+        console.log(`recordClip: captured ${(blob.size / 1024).toFixed(1)} KB [${finalMime}]`);
         resolve(blob.size > 0 ? blob : null);
       };
 
-      recorder.onerror = (e) => {
+      recorder.onerror = (e: Event) => {
         console.error('MediaRecorder error:', e);
         recorderRef.current = null;
         resolve(null);
       };
 
-      recorder.start();
+      // FIX: pass timeslice (1000 ms) so ondataavailable fires every second
+      recorder.start(1000);
 
-      // Auto-stop after the recording window
+      // Auto-stop after recording window
       setTimeout(() => {
-        if (recorder.state === 'recording') recorder.stop();
+        if (recorderRef.current && recorder.state === 'recording') {
+          recorder.stop();
+        }
       }, RECORD_DURATION_MS);
     });
   }, []);
 
-  // ── Toggle front ↔ back camera ────────────────────────────────────────────
+  // ── Toggle front ↔ back (safe — stops recorder before switching stream) ───
   const toggleCamera = useCallback(() => {
     const newMode = facingMode === 'user' ? 'environment' : 'user';
+    // startCapture already calls stopActiveRecorder before touching the stream
     startCapture(newMode);
   }, [facingMode, startCapture]);
 
@@ -118,6 +152,6 @@ export const useVideoRecorder = () => {
     stopCapture,
     recordClip,
     toggleCamera,
-    streamRef, // exposed so EmergencyPage can show a live preview if needed
+    streamRef,
   };
 };

@@ -1,74 +1,61 @@
 /**
- * Upload a media blob to Cloudinary.
+ * Upload any media blob to Cloudinary.
  *
- * - Video clips  →  /video/upload  using VITE_CLOUDINARY_VIDEO_PRESET
- * - Images       →  /image/upload  using VITE_CLOUDINARY_UPLOAD_PRESET
- *
- * Returns the Cloudinary secure_url stored in Firestore.
+ * Routing:
+ *   video/* → VITE_CLOUDINARY_VIDEO_PRESET (afelink_video) via /video/upload
+ *   image/* → VITE_CLOUDINARY_UPLOAD_PRESET (trjrx44o)     via /image/upload
  */
 export const uploadSnapshot = async (blob: Blob): Promise<string> => {
   const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
-
   if (!cloudName) {
     throw new Error('VITE_CLOUDINARY_CLOUD_NAME missing in .env');
   }
 
   const isVideo = blob.type.startsWith('video/');
 
-  if (isVideo) {
-    return uploadToCloudinary(blob, cloudName, 'video');
-  } else {
-    return uploadToCloudinary(blob, cloudName, 'image');
-  }
-};
-
-// ─── Internal helper ──────────────────────────────────────────────────────────
-const uploadToCloudinary = async (
-  blob: Blob,
-  cloudName: string,
-  resourceType: 'video' | 'image'
-): Promise<string> => {
-
-  // Pick the correct preset for video vs image
-  const uploadPreset =
-    resourceType === 'video'
-      ? import.meta.env.VITE_CLOUDINARY_VIDEO_PRESET   // safelink_video preset (Resource type: Video)
-      : import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET; // trjrx44o preset     (Resource type: Image)
+  const uploadPreset = isVideo
+    ? import.meta.env.VITE_CLOUDINARY_VIDEO_PRESET   // afelink_video  → /video/upload
+    : import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET; // trjrx44o       → /image/upload
 
   if (!uploadPreset) {
     throw new Error(
-      `Cloudinary ${resourceType} upload preset missing in .env. ` +
-      `Set VITE_CLOUDINARY_${resourceType.toUpperCase()}_PRESET.`
+      isVideo
+        ? 'VITE_CLOUDINARY_VIDEO_PRESET missing in .env'
+        : 'VITE_CLOUDINARY_UPLOAD_PRESET missing in .env'
     );
   }
 
-  const ext      = resourceType === 'video'
-    ? (blob.type.includes('mp4') ? 'mp4' : 'webm')
-    : 'jpg';
+  const resourceType = isVideo ? 'video' : 'image';
+  const ext = isVideo ? (blob.type.includes('mp4') ? 'mp4' : 'webm') : 'jpg';
   const filename = `${resourceType}_${Date.now()}.${ext}`;
+
+  console.log(
+    `[Cloudinary] Uploading ${filename} | ` +
+    `size: ${(blob.size / 1024).toFixed(1)} KB | ` +
+    `preset: ${uploadPreset} | ` +
+    `endpoint: /${resourceType}/upload`
+  );
 
   const formData = new FormData();
   formData.append('file', blob, filename);
   formData.append('upload_preset', uploadPreset);
 
-  try {
-    const response = await fetch(
-      `https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`,
-      { method: 'POST', body: formData }
-    );
+  const response = await fetch(
+    `https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`,
+    { method: 'POST', body: formData }
+  );
 
-    if (!response.ok) {
+  if (!response.ok) {
+    let errMsg = `HTTP ${response.status}`;
+    try {
       const errorData = await response.json();
-      throw new Error(
-        `Cloudinary ${resourceType} upload failed: ` +
-        (errorData.error?.message || 'Unknown error')
-      );
-    }
-
-    const data = await response.json();
-    return data.secure_url as string;
-  } catch (error) {
-    console.error(`Error uploading ${resourceType} to Cloudinary:`, error);
-    throw error;
+      errMsg = errorData.error?.message || errMsg;
+    } catch (_) {}
+    console.error(`[Cloudinary] Upload failed:`, errMsg);
+    throw new Error(`Cloudinary upload failed: ${errMsg}`);
   }
+
+  const data = await response.json();
+  console.log(`[Cloudinary] ✅ Upload success → ${data.secure_url}`);
+  return data.secure_url as string;
 };
